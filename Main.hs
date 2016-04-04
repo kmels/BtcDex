@@ -11,9 +11,30 @@ download :: IO ()
 download = do
   r <- get "http://coinmarketcap.com/currencies/bitcoin/#markets"
   let body = r ^. responseBody
-      price = weightedPrice body      
+      wprice = weightedPrice body
+      okprice = okcoinFuturesSpotIndex body      
   putStrLn "Done."
-  putStrLn $ "Weighted price: $" ++ (show price)
+  putStrLn $ "Weighted price: $" ++ (show wprice)
+  putStrLn $ "OKCoin Futures Spot: $" ++ (show okprice)
+
+name row = fromTagText $ row !! 8
+byte2float b = read (C8.unpack b) :: Float
+
+btc_24hvolume row = byte2float $ fromAttrib "data-btc" $ row !! 17
+usd_24hvolume row = byte2float $ fromAttrib "data-usd" $ row !! 17  
+usd_price row = byte2float $ fromAttrib "data-usd" $ row !! 20
+
+okcoinFuturesSpotIndex :: L.ByteString -> Float
+okcoinFuturesSpotIndex html = let
+    tags = parseTags html
+    tables = sections (isTagOpenName "table") tags
+    markets = tables !! 1
+    rows = tail $ sections (isTagOpenName "tr") markets
+    
+    fn = (\r -> any ((==) (name r)) ["OKCoin.cn","Huobi","BTCChina","Bitstamp", "OkCoin Intl.", "Bitfinex"])
+    okspot_rowz = filter fn rows
+    prices = map usd_price okspot_rowz    
+  in (sum prices) / (fromIntegral $ length prices)
 
 weightedPrice :: L.ByteString -> Float 
 weightedPrice html = 
@@ -21,14 +42,7 @@ weightedPrice html =
     tags = parseTags html
     tables = sections (isTagOpenName "table") tags
     markets = tables !! 1
-    rows = tail $ sections (isTagOpenName "tr") markets
-    
-    byte2float b = read (C8.unpack b) :: Float
-    
-    name row = fromTagText $ row !! 8
-    btc_24hvolume row = byte2float $ fromAttrib "data-btc" $ row !! 17
-    usd_24hvolume row = byte2float $ fromAttrib "data-usd" $ row !! 17  
-    usd_price row = byte2float $ fromAttrib "data-usd" $ row !! 20
+    rows = tail $ sections (isTagOpenName "tr") markets   
 
     btc_weight row = usd_price row * btc_24hvolume row 
     usd_weight row = usd_price row * usd_24hvolume row    
