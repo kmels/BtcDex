@@ -1,15 +1,97 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric #-}
 module Main where
 
 import Control.Lens
 import Network.Wreq
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Char8 as C8
-import Text.HTML.TagSoup
+import qualified Data.Text as T 
+import qualified Data.String.Utils as Utils
 
-download :: IO ()
-download = do
-  r <- get "http://coinmarketcap.com/currencies/bitcoin/#markets"
+import Text.HTML.TagSoup
+import GHC.Generics
+
+import Data.Aeson
+
+data Currency = Currency {
+  c_name :: T.Text,
+  c_code :: T.Text,
+  cap_usd :: Float,
+  cap_btc :: Float,
+  price_usd :: Float,
+  price_btc :: Float,
+  supply :: Float,
+  vol_24h_usd :: Float,
+  vol_24h_btc :: Float,
+  pchange_1h_usd :: Float,
+  pchange_1h_btc :: Float,
+  pchange_24h_usd :: Float,
+  pchange_24h_btc :: Float,
+  pchange_7d_usd :: Float,
+  pchange_7d_btc :: Float
+} deriving (Generic, Show)
+
+instance ToJSON Currency where
+    toEncoding = genericToEncoding defaultOptions
+    
+downloadCurrencyList :: IO [Currency]
+downloadCurrencyList = do
+  r <- get "http://coinmarketcap.com/all/views/all/"
+  
+  let body = r ^. responseBody
+      html = parseTags body
+      rows = tail $ sections (isTagOpenName "tr") html
+
+      -- name 
+      currency_name row = fromTagText $ row !! 11
+      -- symbol
+      currency_code row = fromTagText $ row !! 17
+      -- market capital
+      currency_cap_usd row = byte2float $ fromAttrib "data-usd" $ row !! 20
+      currency_cap_btc row = byte2float $ fromAttrib "data-btc" $ row !! 20
+      -- price      
+      currency_price_usd row = byte2float $ fromAttrib "data-usd" $ row !! 26
+      currency_price_btc row = byte2float $ fromAttrib "data-btc" $ row !! 26
+      -- supply
+      currency_supply row = byte2float . C8.pack . Utils.replace "," "" . Utils.strip . C8.unpack . fromTagText $ row !! 35
+      -- volume
+      currency_24hvol_usd row = byte2float $ fromAttrib "data-usd" $ row !! 42
+      currency_24hvol_btc row = byte2float $ fromAttrib "data-btc" $ row !! 42
+      -- 1h change
+      currency_1hchange_usd row = byte2float $ fromAttrib "data-usd" $ row !! 48
+      currency_1hchange_btc row = byte2float $ fromAttrib "data-btc" $ row !! 48
+      -- 24h change
+      currency_24hchange_usd row = byte2float $ fromAttrib "data-usd" $ row !! 52
+      currency_24hchange_btc row = byte2float $ fromAttrib "data-btc" $ row !! 52
+      -- 7day change
+      currency_7dchange_usd row = byte2float $ fromAttrib "data-usd" $ row !! 56
+      currency_7dchange_btc row = byte2float $ fromAttrib "data-btc" $ row !! 56
+      
+    in return [ Currency {
+                   c_name = T.pack . C8.unpack $ currency_name row, 
+                   c_code = T.pack . C8.unpack $ currency_code row,
+                   cap_usd = currency_cap_usd row,
+                   cap_btc = currency_cap_btc row,
+                   price_usd = currency_price_usd row,
+                   price_btc = currency_price_btc row, 
+                   supply = currency_supply row,
+                   vol_24h_usd = currency_24hvol_usd row,
+                   vol_24h_btc = currency_24hvol_btc row,
+                   pchange_1h_usd = currency_1hchange_usd row,
+                   pchange_1h_btc = currency_1hchange_btc row,
+                   pchange_24h_usd = currency_24hchange_usd row,
+                   pchange_24h_btc = currency_24hchange_btc row,
+                   pchange_7d_usd = currency_7dchange_usd row,
+                   pchange_7d_btc = currency_7dchange_btc row
+              } | row <- rows ]
+                
+downloadBitcoin :: IO ()
+downloadBitcoin = downloadCurrency "bitcoin"
+
+downloadCurrency :: String -> IO ()
+downloadCurrency c = do
+  r <- get ("http://coinmarketcap.com/currencies/"++c++"/#markets")
   let body = r ^. responseBody
       wprice = weightedPrice body
       okprice = okcoinFuturesSpotIndex body      
@@ -53,4 +135,4 @@ weightedPrice html =
     total_btcvolume = sum $ map btc_24hvolume rows
     in (sum usd_weights) / total_usdvolume
 
-main = download
+main = downloadBitcoin
