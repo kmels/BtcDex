@@ -13,23 +13,24 @@ import Text.HTML.TagSoup
 import GHC.Generics
 
 import Data.Aeson
-
+import Text.Read (readEither)
+import Data.Maybe(catMaybes)
 data Currency = Currency {
   c_name :: T.Text,
   c_code :: T.Text,
-  cap_usd :: Float,
-  cap_btc :: Float,
-  price_usd :: Float,
-  price_btc :: Float,
-  supply :: Float,
-  vol_24h_usd :: Float,
-  vol_24h_btc :: Float,
-  pchange_1h_usd :: Float,
-  pchange_1h_btc :: Float,
-  pchange_24h_usd :: Float,
-  pchange_24h_btc :: Float,
-  pchange_7d_usd :: Float,
-  pchange_7d_btc :: Float
+  cap_usd :: Maybe Float,
+  cap_btc :: Maybe Float,
+  price_usd :: Maybe Float,
+  price_btc :: Maybe Float,
+  supply :: Maybe Float,
+  vol_24h_usd :: Maybe Float,
+  vol_24h_btc :: Maybe Float,
+  pchange_1h_usd :: Maybe Float,
+  pchange_1h_btc :: Maybe Float,
+  pchange_24h_usd :: Maybe Float,
+  pchange_24h_btc :: Maybe Float,
+  pchange_7d_usd :: Maybe Float,
+  pchange_7d_btc :: Maybe Float
 } deriving (Generic, Show)
 
 instance ToJSON Currency where
@@ -41,7 +42,7 @@ downloadCurrencyList = do
   
   let body = r ^. responseBody
       html = parseTags body
-      rows = tail $ sections (isTagOpenName "tr") html
+      rows = tail $! sections (isTagOpenName "tr") html
 
       -- name 
       currency_name row = fromTagText $ row !! 11
@@ -85,7 +86,14 @@ downloadCurrencyList = do
                    pchange_7d_usd = currency_7dchange_usd row,
                    pchange_7d_btc = currency_7dchange_btc row
               } | row <- rows ]
-                
+
+saveCurrencies :: IO ()
+saveCurrencies = do
+  clist <- downloadCurrencyList
+  let cjsons = map encode clist
+  putStrLn "Saved currencies"
+
+  
 downloadBitcoin :: IO ()
 downloadBitcoin = downloadCurrency "bitcoin"
 
@@ -100,7 +108,10 @@ downloadCurrency c = do
   putStrLn $ "OKCoin Futures Spot: $" ++ (show okprice)
 
 name row = fromTagText $ row !! 8
-byte2float b = read (C8.unpack b) :: Float
+
+byte2float :: C8.ByteString -> Maybe Float
+byte2float = either (\l -> Nothing) Just . readEither . C8.unpack
+--byte2float b = read (C8.unpack b) :: Float
 
 btc_24hvolume row = byte2float $ fromAttrib "data-btc" $ row !! 17
 usd_24hvolume row = byte2float $ fromAttrib "data-usd" $ row !! 17  
@@ -116,7 +127,7 @@ okcoinFuturesSpotIndex html = let
     fn = (\r -> any ((==) (name r)) ["OKCoin.cn","Huobi","BTCChina","Bitstamp", "OkCoin Intl.", "Bitfinex"])
     okspot_rowz = filter fn rows
     prices = map usd_price okspot_rowz    
-  in (sum prices) / (fromIntegral $ length prices)
+  in (sum . catMaybes $ prices) / (fromIntegral $ length prices)
 
 weightedPrice :: L.ByteString -> Float 
 weightedPrice html = 
@@ -126,13 +137,13 @@ weightedPrice html =
     markets = tables !! 1
     rows = tail $ sections (isTagOpenName "tr") markets   
 
-    btc_weight row = usd_price row * btc_24hvolume row 
-    usd_weight row = usd_price row * usd_24hvolume row    
+    btc_weight row = usd_price row >>= \p -> btc_24hvolume row >>= \v -> return (p * v)
+    usd_weight row = usd_price row >>= \p -> usd_24hvolume row >>= \v -> return (p * v)
 
     btc_weights = map btc_weight rows
     usd_weights = map usd_weight rows
-    total_usdvolume = sum $ map usd_24hvolume rows
-    total_btcvolume = sum $ map btc_24hvolume rows
-    in (sum usd_weights) / total_usdvolume
+    total_usdvolume = sum . catMaybes $ map usd_24hvolume rows
+    total_btcvolume = sum . catMaybes $ map btc_24hvolume rows
+    in (sum . catMaybes $ usd_weights) / total_usdvolume
 
 main = downloadBitcoin
