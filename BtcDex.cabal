@@ -19,10 +19,13 @@ executable BtcDex
   -- other-modules:       
   build-depends:       base == 4.8.*
                        , aeson == 0.11.*
+                       , bloodhound 
                        , bytestring
+                       , http-client
                        , lens
                        , MissingH
                        , tagsoup
                        , utf8-string
                        , text
+                       , time
                        , wreq
